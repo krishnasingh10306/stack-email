@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8f5">
+  <title>Letterdrop — thoughtful team email</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">✳</span><span>letterdrop<span class="brand-period">.</span></span></a>
+      <div class="workspace-label">WORKSPACE</div>
+      <button class="nav-link active"><span class="nav-icon">▤</span> New campaign <span class="nav-plus">+</span></button>
+      <button class="nav-link muted" id="history-link"><span class="nav-icon">◷</span> Recent activity</button>
+      <div class="sidebar-bottom">
+        <div class="help-card"><span class="help-spark">✳</span><strong>A little help?</strong><p>See the quick start guide and get your first note on its way.</p><a href="#quick-start">Read the guide <span>↗</span></a></div>
+        <div class="profile"><div class="avatar">Y</div><div><strong>Your workspace</strong><small>Local & private</small></div><span class="dots">···</span></div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <b>New campaign</b></div><div class="top-actions"><span class="secure"><i></i> Your data stays private</span><button class="icon-button" aria-label="Help">?</button></div></header>
+      <div class="content">
+        <div class="intro"><div><div class="eyebrow"><span class="eyebrow-dot"></span> MADE FOR THE PEOPLE WHO MAKE IT HAPPEN</div><h1>A note to your <em>people.</em></h1><p class="subtitle">One thoughtful message, delivered personally to every teammate.</p></div><div class="step-counter"><span>01</span> / 03</div></div>
+        <div class="progress"><span class="progress-fill"></span></div>
+        <section class="section-block"><div class="section-heading"><div class="step-icon violet">01</div><div><h2>Who’s on your list?</h2><p>Start with an employee spreadsheet. We’ll take it from there.</p></div><span class="optional-tag">.xlsx or .csv</span></div>
+          <label class="upload-zone" id="drop-zone" for="file-input"><input id="file-input" type="file" accept=".xlsx,.csv"><span class="upload-icon">↥</span><span class="upload-copy"><strong>Drop your spreadsheet here</strong><small>or <u>browse files</u> from your computer</small></span><span class="file-badge">XLSX&nbsp; · &nbsp;CSV</span></label>
+          <div class="upload-foot"><span><b>✳</b> We match each row to the right person.</span><button id="template-button" class="text-button">Download sample sheet <span>↓</span></button></div>
+          <div id="contacts-panel" class="contacts-panel hidden"></div>
+        </section>
+        <section class="section-block message-section"><div class="section-heading"><div class="step-icon peach">02</div><div><h2>Write your note</h2><p>Keep it personal. A name goes a long way.</p></div></div>
+          <div class="message-card"><label class="field-label" for="subject">SUBJECT LINE</label><input id="subject" class="subject-input" maxlength="180" placeholder="A little something for the team…"><div class="editor-rule"></div><label class="field-label body-label" for="body">YOUR MESSAGE</label><textarea id="body" rows="6" placeholder="Hi {{ First name }},&#10;&#10;I wanted to take a moment to say thank you for all the care and energy you bring to the team. It makes a difference.&#10;&#10;With appreciation,&#10;Your name"></textarea><div class="editor-footer"><span>Personalize with <button class="token-button" data-token="{{ First name }}">{{ First name }} <b>+</b></button> <span class="hint">or any spreadsheet column</span></span><span id="char-count">0 characters</span></div></div>
+        </section>
+        <section class="section-block setup-section"><div class="section-heading"><div class="step-icon green">03</div><div><h2>Connect your email</h2><p>Your email provider delivers each note one-to-one.</p></div><button id="setup-toggle" class="subtle-button">Set up SMTP <span>⌄</span></button></div>
+          <div id="smtp-panel" class="smtp-panel hidden"><div class="smtp-note"><span>ⓘ</span> Credentials are used only for this send and never saved. Port 587 is set automatically.</div><div class="smtp-grid"><label>SMTP HOST<input id="smtp-host" placeholder="smtp.gmail.com" autocomplete="off"></label><label>YOUR EMAIL<input id="smtp-email" type="email" placeholder="you@company.com" autocomplete="email"></label><label class="full">APP PASSWORD<input id="smtp-password" type="password" placeholder="Use an app password, not your regular password" autocomplete="new-password"></label></div><p class="provider-hint">Gmail: smtp.gmail.com · Outlook: smtp.office365.com · Use an app password where required.</p></div>
+        </section>
+        <div class="send-row"><div class="send-assurance"><span>◎</span><span><strong>Sent individually</strong><small>No one sees someone else’s address.</small></span></div><button id="send-button" class="send-button" disabled><span>Review & send</span><span class="send-arrow">↗</span></button></div>
+        <footer id="quick-start"><span>Made for good teams, everywhere.</span><span>Quick start: upload → write → connect → send</span></footer>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <dialog id="confirm-dialog"><div class="dialog-icon">✉</div><h2>Ready to send?</h2><p id="confirm-copy"></p><p class="dialog-warning">This sends one separate email to each person on your list. You can’t undo it.</p><div class="dialog-actions"><button id="cancel-send" class="cancel-button">Not yet</button><button id="confirm-send" class="send-button">Send emails <span class="send-arrow">↗</span></button></div></dialog>
+  <script src="/app.js" defer></script>
+</body>
+</html>

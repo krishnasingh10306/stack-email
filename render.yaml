@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: letterdrop
+    runtime: python
+    plan: starter
+    buildCommand: python -m compileall -q .
+    startCommand: python server.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: APP_USERNAME
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
