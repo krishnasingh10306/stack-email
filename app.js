@@ -124,7 +124,10 @@ $('#confirm-send').addEventListener('click', async () => {
     } else {
       const failed = result.results.length - result.sent;
       toast(`${result.sent} sent${failed ? ` · ${failed} failed` : ' successfully'}.`);
-      if (failed) toast(`${result.sent} sent · ${failed} failed. Check Resend status and retry failed addresses.`);
+      if (failed) {
+        const firstFailure = result.results.find((item) => !item.ok);
+        toast(`${firstFailure.email}: ${firstFailure.error || 'Resend rejected this email.'}`);
+      }
     }
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.innerHTML = isScheduled() ? 'Schedule email <span class="send-arrow">◷</span>' : 'Send emails <span class="send-arrow">↗</span>'; }

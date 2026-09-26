@@ -121,7 +121,8 @@ def send_scheduled_campaign(campaign_id, payload_blob):
         results = deliver_campaign(payload)
         sent = sum(1 for result in results if result["ok"])
         status = "sent" if sent == len(results) else "partial" if sent else "failed"
-        error = None if status == "sent" else f"{len(results) - sent} recipient(s) could not be delivered."
+        failures = [f"{result['email']}: {result['error']}" for result in results if not result["ok"]]
+        error = None if status == "sent" else " | ".join(failures[:2])[:500]
     except Exception as exc:
         status, error = "failed", str(exc)
     with database_connection() as connection:
