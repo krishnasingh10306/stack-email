@@ -65,8 +65,8 @@ $('#template-button').addEventListener('click', () => {
 });
 
 $('#setup-toggle').addEventListener('click', () => {
-  const opened = $('#smtp-panel').classList.toggle('hidden');
-  $('#setup-toggle').innerHTML = opened ? 'Set up SMTP <span>⌄</span>' : 'Hide setup <span>⌃</span>';
+  const opened = $('#resend-panel').classList.toggle('hidden');
+  $('#setup-toggle').innerHTML = opened ? 'Set up Resend <span>⌄</span>' : 'Hide setup <span>⌃</span>';
 });
 document.querySelectorAll('#subject, #body').forEach((element) => element.addEventListener('input', () => { $('#char-count').textContent = `${$('#body').value.length} characters`; refreshSend(); }));
 document.querySelectorAll('.token-button').forEach((button) => button.addEventListener('click', () => {
@@ -98,7 +98,7 @@ sendButton.addEventListener('click', () => {
     ? `“${$('#subject').value.trim()}” will be sent to ${contacts.length} ${contacts.length === 1 ? 'person' : 'people'} on ${when} (${timeZone}).`
     : `You’re about to send “${$('#subject').value.trim()}” to ${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}.`;
   $('#confirm-warning').textContent = scheduled
-    ? 'The recipient list and SMTP app password will be stored encrypted until sending. You can cancel this scheduled send beforehand.'
+    ? 'The recipient list and Resend API key will be stored encrypted until sending. You can cancel this scheduled send beforehand.'
     : 'This sends one separate email to each person on your list. You can’t undo it.';
   $('#confirm-send').innerHTML = scheduled ? 'Schedule email <span class="send-arrow">◷</span>' : 'Send emails <span class="send-arrow">↗</span>';
   dialog.showModal();
@@ -110,8 +110,7 @@ $('#confirm-send').addEventListener('click', async () => {
   button.disabled = true; button.textContent = scheduled ? 'Scheduling…' : 'Sending…';
   const payload = {
     contacts, subject: $('#subject').value.trim(), body: $('#body').value,
-    host: $('#smtp-host').value, port: 587,
-    sender: $('#smtp-email').value, username: $('#smtp-email').value, password: $('#smtp-password').value,
+    sender: $('#sender-email').value,
   };
   if (scheduled) payload.run_at = new Date($('#schedule-datetime').value).toISOString();
   try {
@@ -120,13 +119,12 @@ $('#confirm-send').addEventListener('click', async () => {
     if (!response.ok) throw new Error(result.error || 'Email sending failed.');
     dialog.close();
     if (scheduled) {
-      $('#smtp-password').value = '';
       toast(`Scheduled for ${new Date(result.run_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`);
       await loadSchedules();
     } else {
       const failed = result.results.length - result.sent;
       toast(`${result.sent} sent${failed ? ` · ${failed} failed` : ' successfully'}.`);
-      if (failed) toast(`${result.sent} sent · ${failed} failed. Check SMTP and try the failed addresses again.`);
+      if (failed) toast(`${result.sent} sent · ${failed} failed. Check Resend status and retry failed addresses.`);
     }
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.innerHTML = isScheduled() ? 'Schedule email <span class="send-arrow">◷</span>' : 'Send emails <span class="send-arrow">↗</span>'; }

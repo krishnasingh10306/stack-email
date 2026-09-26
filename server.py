@@ -1,21 +1,22 @@
 import csv
 import base64
+import html
 import hmac
 import io
 import json
 import os
 import re
-import smtplib
 import sqlite3
 import threading
 import time
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -68,43 +69,49 @@ def validate_campaign(payload):
     contacts = payload.get("contacts", [])
     if not contacts or len(contacts) > MAX_RECIPIENTS:
         raise ValueError(f"Choose between 1 and {MAX_RECIPIENTS} valid contacts.")
-    host = str(payload.get("host", "")).strip()
-    port = int(payload.get("port", 587))
-    username = str(payload.get("username", ""))
-    password = str(payload.get("password", ""))
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
     sender = str(payload.get("sender", "")).strip()
     subject, body = str(payload.get("subject", "")).strip(), str(payload.get("body", ""))
-    if not all((host, username, password, sender, subject, body)):
-        raise ValueError("Fill in all SMTP and message fields.")
+    if not all((api_key, sender, subject, body)):
+        raise ValueError("Configure RESEND_API_KEY on the server, then enter a verified sender email, subject, and message.")
+    if not api_key.startswith("re_"):
+        raise ValueError("Enter a valid Resend API key.")
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", sender):
         raise ValueError("Enter a valid sender email address.")
-    if port != 587:
-        raise ValueError("SMTP port must be 587.")
-    return contacts, host, port, username, password, sender, subject, body
+    return contacts, api_key, sender, subject, body
 
 
 def deliver_campaign(payload):
-    contacts, host, port, username, password, sender, subject, body = validate_campaign(payload)
+    contacts, api_key, sender, subject, body = validate_campaign(payload)
     results = []
-    try:
-        with smtplib.SMTP(host, port, timeout=30) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.ehlo()
-            smtp.login(username, password)
-            for contact in contacts:
-                recipient = next((v for k, v in contact.items() if k.lower() in ("email", "email address", "work email", "e-mail")), "")
-                message = EmailMessage()
-                message["From"], message["To"] = sender, recipient
-                message["Subject"] = subject
-                message.set_content(re.sub(r"\{\{\s*([^}]+?)\s*\}\}", lambda m: next((v for k, v in contact.items() if k.lower() == m.group(1).lower()), m.group(0)), body))
-                try:
-                    smtp.send_message(message)
-                    results.append({"email": recipient, "ok": True})
-                except Exception as exc:
-                    results.append({"email": recipient, "ok": False, "error": str(exc)})
-    except Exception as exc:
-        raise RuntimeError(f"SMTP connection failed: {exc}") from exc
+    for contact in contacts:
+        recipient = next((v for k, v in contact.items() if k.lower() in ("email", "email address", "work email", "e-mail")), "")
+        personalized = re.sub(r"\{\{\s*([^}]+?)\s*\}\}", lambda m: next((v for k, v in contact.items() if k.lower() == m.group(1).lower()), m.group(0)), body)
+        message = {
+            "from": sender,
+            "to": [recipient],
+            "subject": subject,
+            "text": personalized,
+            "html": "<div style=\"white-space: pre-wrap\">" + html.escape(personalized) + "</div>",
+        }
+        request = Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(message).encode("utf-8"),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                result = json.loads(response.read())
+            results.append({"email": recipient, "ok": True, "id": result.get("id")})
+        except HTTPError as exc:
+            try:
+                details = json.loads(exc.read()).get("message", str(exc))
+            except (ValueError, AttributeError):
+                details = str(exc)
+            results.append({"email": recipient, "ok": False, "error": details})
+        except (URLError, TimeoutError, OSError) as exc:
+            results.append({"email": recipient, "ok": False, "error": f"Resend API request failed: {exc}"})
     return results
 
 
