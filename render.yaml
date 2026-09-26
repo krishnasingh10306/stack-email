@@ -19,7 +19,5 @@ services:
         sync: false
       - key: APP_PASSWORD
         sync: false
-      - key: RESEND_API_KEY
-        sync: false
       - key: APP_ENCRYPTION_KEY
         generateValue: true
