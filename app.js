@@ -47,7 +47,12 @@ function renderContacts() {
 }
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
-function refreshSend() { sendButton.disabled = !(contacts.length && $('#subject').value.trim() && $('#body').value.trim()); }
+function isScheduled() { return $('input[name="send-timing"]:checked').value === 'later'; }
+function refreshSend() {
+  const scheduleValid = !isScheduled() || ($('#schedule-datetime').value && new Date($('#schedule-datetime').value).getTime() > Date.now());
+  sendButton.disabled = !(contacts.length && $('#subject').value.trim() && $('#body').value.trim() && scheduleValid);
+  sendButton.querySelector('span:first-child').textContent = isScheduled() ? 'Review schedule' : 'Review & send';
+}
 
 fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
 for (const eventName of ['dragenter', 'dragover']) dropZone.addEventListener(eventName, (event) => { event.preventDefault(); dropZone.classList.add('dragging'); });
@@ -69,30 +74,95 @@ document.querySelectorAll('.token-button').forEach((button) => button.addEventLi
   textarea.setRangeText(token, start, end, 'end'); textarea.focus(); textarea.dispatchEvent(new Event('input'));
 }));
 
+function setDateMinimum() {
+  const date = new Date(Date.now() + 120000);
+  date.setSeconds(0, 0);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  $('#schedule-datetime').min = local;
+}
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'your local time';
+$('#timezone-note').textContent = `Time is based on this device’s time zone (${timeZone}).`;
+setDateMinimum();
+document.querySelectorAll('input[name="send-timing"]').forEach((radio) => radio.addEventListener('change', () => {
+  document.querySelectorAll('.timing-option').forEach((option) => option.classList.toggle('selected', option.querySelector('input').checked));
+  $('#scheduled-time-fields').classList.toggle('hidden', !isScheduled());
+  refreshSend();
+}));
+$('#schedule-datetime').addEventListener('input', refreshSend);
+
 sendButton.addEventListener('click', () => {
-  $('#confirm-copy').textContent = `You’re about to send “${$('#subject').value.trim()}” to ${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}.`;
+  const scheduled = isScheduled();
+  const when = scheduled ? new Date($('#schedule-datetime').value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  $('#confirm-title').textContent = scheduled ? 'Schedule this note?' : 'Ready to send?';
+  $('#confirm-copy').textContent = scheduled
+    ? `“${$('#subject').value.trim()}” will be sent to ${contacts.length} ${contacts.length === 1 ? 'person' : 'people'} on ${when} (${timeZone}).`
+    : `You’re about to send “${$('#subject').value.trim()}” to ${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}.`;
+  $('#confirm-warning').textContent = scheduled
+    ? 'The recipient list and SMTP app password will be stored encrypted until sending. You can cancel this scheduled send beforehand.'
+    : 'This sends one separate email to each person on your list. You can’t undo it.';
+  $('#confirm-send').innerHTML = scheduled ? 'Schedule email <span class="send-arrow">◷</span>' : 'Send emails <span class="send-arrow">↗</span>';
   dialog.showModal();
 });
 $('#cancel-send').addEventListener('click', () => dialog.close());
 $('#confirm-send').addEventListener('click', async () => {
   const button = $('#confirm-send');
-  button.disabled = true; button.textContent = 'Sending…';
+  const scheduled = isScheduled();
+  button.disabled = true; button.textContent = scheduled ? 'Scheduling…' : 'Sending…';
   const payload = {
     contacts, subject: $('#subject').value.trim(), body: $('#body').value,
     host: $('#smtp-host').value, port: 587,
     sender: $('#smtp-email').value, username: $('#smtp-email').value, password: $('#smtp-password').value,
   };
+  if (scheduled) payload.run_at = new Date($('#schedule-datetime').value).toISOString();
   try {
-    const response = await fetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const response = await fetch(scheduled ? '/api/schedule' : '/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Email sending failed.');
-    const failed = result.results.length - result.sent;
-    toast(`${result.sent} sent${failed ? ` · ${failed} failed` : ' successfully'}.`);
-    if (!failed) dialog.close();
-    if (failed) toast(`${result.sent} sent · ${failed} failed. Check SMTP and try the failed addresses again.`);
+    dialog.close();
+    if (scheduled) {
+      $('#smtp-password').value = '';
+      toast(`Scheduled for ${new Date(result.run_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`);
+      await loadSchedules();
+    } else {
+      const failed = result.results.length - result.sent;
+      toast(`${result.sent} sent${failed ? ` · ${failed} failed` : ' successfully'}.`);
+      if (failed) toast(`${result.sent} sent · ${failed} failed. Check SMTP and try the failed addresses again.`);
+    }
   } catch (error) { toast(error.message); }
-  finally { button.disabled = false; button.innerHTML = 'Send emails <span class="send-arrow">↗</span>'; }
+  finally { button.disabled = false; button.innerHTML = isScheduled() ? 'Schedule email <span class="send-arrow">◷</span>' : 'Send emails <span class="send-arrow">↗</span>'; }
 });
 
-$('#history-link').addEventListener('click', () => toast('Email history is not stored by this private local app.'));
+function statusLabel(status) { return ({ scheduled: 'Scheduled', sending: 'Sending now', sent: 'Sent', partial: 'Partially sent', failed: 'Needs attention', cancelled: 'Cancelled' })[status] || status; }
+async function loadSchedules() {
+  try {
+    const response = await fetch('/api/schedules');
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load scheduled sends.');
+    const schedules = result.schedules;
+    $('#schedule-board').classList.toggle('hidden', schedules.length === 0);
+    $('#schedule-list').innerHTML = schedules.map((schedule) => {
+      const time = new Date(schedule.run_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+      const message = schedule.error ? `<small class="schedule-error">${escapeHtml(schedule.error)}</small>` : '';
+      const cancel = schedule.status === 'scheduled' ? `<button class="cancel-schedule" data-id="${escapeHtml(schedule.id)}">Cancel</button>` : '';
+      const icon = schedule.status === 'scheduled' ? '◷' : schedule.status === 'sent' ? '✓' : '·';
+      return `<article class="schedule-item"><div class="schedule-clock">${icon}</div><div class="schedule-details"><strong>${escapeHtml(schedule.recipient_count)} ${schedule.recipient_count === 1 ? 'recipient' : 'recipients'}</strong><span>${escapeHtml(time)}</span>${message}</div><span class="schedule-status status-${escapeHtml(schedule.status)}">${escapeHtml(statusLabel(schedule.status))}</span>${cancel}</article>`;
+    }).join('');
+  } catch (error) { toast(error.message); }
+}
+$('#schedule-list').addEventListener('click', async (event) => {
+  const button = event.target.closest('.cancel-schedule');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/schedules/${encodeURIComponent(button.dataset.id)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not cancel this scheduled send.');
+    toast('Scheduled send cancelled.');
+    await loadSchedules();
+  } catch (error) { toast(error.message); button.disabled = false; }
+});
+$('#refresh-schedules').addEventListener('click', loadSchedules);
+$('#history-link').addEventListener('click', () => { loadSchedules(); $('#schedule-board').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
 $('#char-count').textContent = `${$('#body').value.length} characters`;
+loadSchedules();
+setInterval(loadSchedules, 30000);

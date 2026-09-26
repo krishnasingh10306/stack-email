@@ -6,19 +6,137 @@ import json
 import os
 import re
 import smtplib
+import sqlite3
 import threading
+import time
 import xml.etree.ElementTree as ET
 import zipfile
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
+
+from cryptography.fernet import Fernet, InvalidToken
 
 
 ROOT = Path(__file__).parent
 MAX_UPLOAD = 15 * 1024 * 1024
+MAX_REQUEST_BYTES = MAX_UPLOAD * 2 + 1024 * 1024
 MAX_RECIPIENTS = 500
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main", "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
+DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
+DATABASE = DATA_DIR / "letterdrop.sqlite3"
+_cipher = None
+
+
+def get_cipher():
+    global _cipher
+    if _cipher is None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        key = os.environ.get("APP_ENCRYPTION_KEY")
+        if key:
+            _cipher = Fernet(key.encode("ascii"))
+        else:
+            key_file = DATA_DIR / ".app_key"
+            if not key_file.exists():
+                key_file.write_bytes(Fernet.generate_key())
+                try:
+                    key_file.chmod(0o600)
+                except OSError:
+                    pass
+            _cipher = Fernet(key_file.read_bytes().strip())
+    return _cipher
+
+
+def database_connection():
+    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_database():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with database_connection() as connection:
+        connection.execute("CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, run_at REAL NOT NULL, status TEXT NOT NULL, recipient_count INTEGER NOT NULL, payload BLOB, error TEXT, created_at REAL NOT NULL)")
+        connection.execute("UPDATE campaigns SET status = 'failed', payload = NULL, error = 'The server restarted during sending. Review delivery before scheduling again.' WHERE status = 'sending'")
+        connection.execute("DELETE FROM campaigns WHERE status IN ('sent', 'partial', 'failed', 'cancelled') AND created_at < ?", (time.time() - 90 * 24 * 60 * 60,))
+
+
+def validate_campaign(payload):
+    contacts = payload.get("contacts", [])
+    if not contacts or len(contacts) > MAX_RECIPIENTS:
+        raise ValueError(f"Choose between 1 and {MAX_RECIPIENTS} valid contacts.")
+    host = str(payload.get("host", "")).strip()
+    port = int(payload.get("port", 587))
+    username = str(payload.get("username", ""))
+    password = str(payload.get("password", ""))
+    sender = str(payload.get("sender", "")).strip()
+    subject, body = str(payload.get("subject", "")).strip(), str(payload.get("body", ""))
+    if not all((host, username, password, sender, subject, body)):
+        raise ValueError("Fill in all SMTP and message fields.")
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", sender):
+        raise ValueError("Enter a valid sender email address.")
+    if port != 587:
+        raise ValueError("SMTP port must be 587.")
+    return contacts, host, port, username, password, sender, subject, body
+
+
+def deliver_campaign(payload):
+    contacts, host, port, username, password, sender, subject, body = validate_campaign(payload)
+    results = []
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(username, password)
+            for contact in contacts:
+                recipient = next((v for k, v in contact.items() if k.lower() in ("email", "email address", "work email", "e-mail")), "")
+                message = EmailMessage()
+                message["From"], message["To"] = sender, recipient
+                message["Subject"] = subject
+                message.set_content(re.sub(r"\{\{\s*([^}]+?)\s*\}\}", lambda m: next((v for k, v in contact.items() if k.lower() == m.group(1).lower()), m.group(0)), body))
+                try:
+                    smtp.send_message(message)
+                    results.append({"email": recipient, "ok": True})
+                except Exception as exc:
+                    results.append({"email": recipient, "ok": False, "error": str(exc)})
+    except Exception as exc:
+        raise RuntimeError(f"SMTP connection failed: {exc}") from exc
+    return results
+
+
+def send_scheduled_campaign(campaign_id, payload_blob):
+    try:
+        payload = json.loads(get_cipher().decrypt(payload_blob))
+        results = deliver_campaign(payload)
+        sent = sum(1 for result in results if result["ok"])
+        status = "sent" if sent == len(results) else "partial" if sent else "failed"
+        error = None if status == "sent" else f"{len(results) - sent} recipient(s) could not be delivered."
+    except Exception as exc:
+        status, error = "failed", str(exc)
+    with database_connection() as connection:
+        connection.execute("UPDATE campaigns SET status = ?, payload = NULL, error = ? WHERE id = ? AND status = 'sending'", (status, error, campaign_id))
+
+
+def scheduler_loop():
+    while True:
+        try:
+            with database_connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute("SELECT id, payload FROM campaigns WHERE status = 'scheduled' AND run_at <= ? ORDER BY run_at LIMIT 1", (time.time(),)).fetchone()
+                if row:
+                    connection.execute("UPDATE campaigns SET status = 'sending' WHERE id = ? AND status = 'scheduled'", (row["id"],))
+                connection.commit()
+            if row:
+                send_scheduled_campaign(row["id"], row["payload"])
+            else:
+                time.sleep(5)
+        except Exception as exc:
+            print(f"Scheduler error: {exc}")
+            time.sleep(5)
 
 
 def read_xlsx(data):
@@ -138,6 +256,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"status": "ok"})
         if not self.require_auth():
             return
+        if path == "/api/schedules":
+            with database_connection() as connection:
+                rows = connection.execute("SELECT id, run_at, status, recipient_count, error FROM campaigns ORDER BY run_at DESC LIMIT 50").fetchall()
+            return self.send_json({"schedules": [{"id": row["id"], "run_at": datetime.fromtimestamp(row["run_at"], timezone.utc).isoformat(), "status": row["status"], "recipient_count": row["recipient_count"], "error": row["error"]} for row in rows]})
         if path == "/":
             body = (ROOT / "index.html").read_bytes()
             mime = "text/html; charset=utf-8"
@@ -158,7 +280,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length > MAX_UPLOAD + 1024 * 1024:
+            if length > MAX_REQUEST_BYTES:
                 return self.send_json({"error": "Request too large."}, 413)
             payload = json.loads(self.rfile.read(length))
             if self.path == "/api/contacts":
@@ -166,43 +288,47 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"contacts": parse_contacts(payload["filename"], raw)})
             if self.path == "/api/send":
                 return self.send_campaign(payload)
+            if self.path == "/api/schedule":
+                return self.schedule_campaign(payload)
+            if self.path.startswith("/api/schedules/") and self.path.endswith("/cancel"):
+                campaign_id = self.path.removeprefix("/api/schedules/").removesuffix("/cancel").strip("/")
+                with database_connection() as connection:
+                    result = connection.execute("UPDATE campaigns SET status = 'cancelled', payload = NULL WHERE id = ? AND status = 'scheduled'", (campaign_id,))
+                if result.rowcount != 1:
+                    return self.send_json({"error": "This send has already started or is no longer scheduled."}, 409)
+                return self.send_json({"ok": True})
             self.send_error(404)
         except (ValueError, KeyError, zipfile.BadZipFile, ET.ParseError, UnicodeDecodeError) as exc:
             self.send_json({"error": str(exc)}, 400)
 
     def send_campaign(self, payload):
-        contacts = payload.get("contacts", [])
-        if not contacts or len(contacts) > MAX_RECIPIENTS:
-            return self.send_json({"error": f"Choose between 1 and {MAX_RECIPIENTS} valid contacts."}, 400)
-        host, port = payload.get("host", "").strip(), int(payload.get("port", 587))
-        username, password = payload.get("username", ""), payload.get("password", "")
-        sender = payload.get("sender", "").strip()
-        subject, body = payload.get("subject", "").strip(), payload.get("body", "")
-        if not all((host, username, password, sender, subject, body)):
-            return self.send_json({"error": "Fill in all SMTP and message fields."}, 400)
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", sender):
-            return self.send_json({"error": "Enter a valid sender email address."}, 400)
         results = []
         try:
-            with smtplib.SMTP(host, port, timeout=30) as smtp:
-                smtp.ehlo()
-                smtp.starttls()
-                smtp.ehlo()
-                smtp.login(username, password)
-                for contact in contacts:
-                    recipient = next((v for k, v in contact.items() if k.lower() in ("email", "email address", "work email", "e-mail")), "")
-                    message = EmailMessage()
-                    message["From"], message["To"] = sender, recipient
-                    message["Subject"] = subject
-                    message.set_content(re.sub(r"\{\{\s*([^}]+?)\s*\}\}", lambda m: next((v for k, v in contact.items() if k.lower() == m.group(1).lower()), m.group(0)), body))
-                    try:
-                        smtp.send_message(message)
-                        results.append({"email": recipient, "ok": True})
-                    except Exception as exc:
-                        results.append({"email": recipient, "ok": False, "error": str(exc)})
-        except Exception as exc:
-            return self.send_json({"error": f"SMTP connection failed: {exc}"}, 502)
+            results = deliver_campaign(payload)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        except RuntimeError as exc:
+            return self.send_json({"error": str(exc)}, 502)
         self.send_json({"results": results, "sent": sum(1 for result in results if result["ok"])})
+
+    def schedule_campaign(self, payload):
+        try:
+            contacts, *_ = validate_campaign(payload)
+            run_at = datetime.fromisoformat(payload.get("run_at", "").replace("Z", "+00:00"))
+            if run_at.tzinfo is None:
+                raise ValueError("Choose a date and time with a time zone.")
+            run_timestamp = run_at.astimezone(timezone.utc).timestamp()
+            if run_timestamp < time.time() + 10:
+                raise ValueError("Choose a send time at least 10 seconds in the future.")
+            if run_timestamp > time.time() + 365 * 24 * 60 * 60:
+                raise ValueError("Schedule sends no more than one year in advance.")
+            campaign_id = uuid4().hex
+            encrypted_payload = get_cipher().encrypt(json.dumps(payload).encode("utf-8"))
+            with database_connection() as connection:
+                connection.execute("INSERT INTO campaigns (id, run_at, status, recipient_count, payload, error, created_at) VALUES (?, ?, 'scheduled', ?, ?, NULL, ?)", (campaign_id, run_timestamp, len(contacts), encrypted_payload, time.time()))
+            return self.send_json({"id": campaign_id, "status": "scheduled", "run_at": run_at.astimezone(timezone.utc).isoformat(), "recipient_count": len(contacts)}, 201)
+        except (ValueError, TypeError) as exc:
+            return self.send_json({"error": str(exc)}, 400)
 
     def log_message(self, format, *args):
         print(f"{self.address_string()} - {format % args}")
@@ -212,5 +338,8 @@ if __name__ == "__main__":
     host, port = os.environ.get("HOST", "127.0.0.1"), int(os.environ.get("PORT", "8000"))
     if host == "0.0.0.0" and not all((os.environ.get("APP_USERNAME"), os.environ.get("APP_PASSWORD"))):
         raise SystemExit("Set APP_USERNAME and APP_PASSWORD before exposing Letterdrop publicly.")
+    get_cipher()
+    initialize_database()
+    threading.Thread(target=scheduler_loop, daemon=True, name="letterdrop-scheduler").start()
     print(f"TeamMail is ready at http://{host}:{port}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()

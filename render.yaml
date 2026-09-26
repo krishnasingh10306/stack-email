@@ -3,13 +3,21 @@ services:
     name: letterdrop
     runtime: python
     plan: starter
-    buildCommand: python -m compileall -q .
+    buildCommand: pip install -r requirements.txt && python -m compileall -q .
     startCommand: python server.py
     healthCheckPath: /healthz
+    disk:
+      name: letterdrop-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data
       - key: APP_USERNAME
         sync: false
       - key: APP_PASSWORD
         sync: false
+      - key: APP_ENCRYPTION_KEY
+        generateValue: true

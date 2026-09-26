@@ -1,1 +1,1 @@
-# Letterdrop uses only Python's standard library; no packages to install.
+cryptography>=42.0
