@@ -15,9 +15,5 @@ services:
         value: cloud
       - key: APP_DATA_DIR
         value: /var/data
-      - key: DASHBOARD_USERNAME
-        sync: false
-      - key: DASHBOARD_PASSWORD
-        sync: false
       - key: SMTP_ENCRYPTION_KEY
         sync: false

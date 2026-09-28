@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import json
 import io
-import base64
-import hmac
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
-from contextlib import redirect_stderr, redirect_stdout
+from http.cookies import CookieError, SimpleCookie
 from datetime import date, datetime
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -27,10 +26,12 @@ from openpyxl.styles import Alignment, Border, Side
 
 import reminder_automation as automation
 import smtp_settings
+import account_store
 
 
 BASE_DIR = Path(__file__).resolve().parent
 PAGE_PATH = BASE_DIR / "web" / "index.html"
+LOGIN_PAGE_PATH = BASE_DIR / "web" / "login.html"
 CLOUD_MODE = os.environ.get("APP_ENV", "").casefold() == "cloud" or bool(os.environ.get("RENDER"))
 DATA_DIR = Path(os.environ.get("APP_DATA_DIR", str(BASE_DIR))).resolve()
 SCHEDULER_PATH = DATA_DIR / "auto_send_enabled.json"
@@ -74,10 +75,20 @@ def cell_text(value) -> str:
     return str(value)
 
 
-def workbook_rows() -> tuple[list[dict], dict]:
-    if not automation.WORKBOOK_PATH.exists():
+def account_paths(user_id: str) -> tuple[Path, Path, Path]:
+    account_dir = DATA_DIR / "users" / user_id
+    account_dir.mkdir(parents=True, exist_ok=True)
+    return (
+        account_dir / "training_reminders.xlsx",
+        account_dir / "smtp_settings.json",
+        account_dir / "auto_send_enabled.json",
+    )
+
+
+def workbook_rows(workbook_path: Path, settings_path: Path, schedule_path: Path) -> tuple[list[dict], dict]:
+    if not workbook_path.exists():
         raise FileNotFoundError("training_reminders.xlsx is missing from this folder.")
-    workbook = load_workbook(automation.WORKBOOK_PATH)
+    workbook = load_workbook(workbook_path)
     sheet = workbook.active
     header_row, headers = automation.find_header_row(sheet)
     bind_source_headers(sheet, header_row, headers)
@@ -124,27 +135,27 @@ def workbook_rows() -> tuple[list[dict], dict]:
         "upcoming": sum(1 for item in ready if not item["isDue"]),
         "sent": sum(1 for item in rows if item["status"].lower() == "sent"),
         "needsAttention": sum(1 for item in rows if item["status"].lower() in {"paused", "error", "sending"}),
-        "smtp": smtp_settings.public_settings(),
-        "scheduler": scheduler_state(),
+        "smtp": smtp_settings.public_settings(settings_path),
+        "scheduler": scheduler_state(schedule_path),
         "schedulerMode": "cloud" if CLOUD_MODE else "windows",
         "timeZone": "Asia/Kolkata",
     }
     return rows, summary
 
 
-def scheduler_state() -> str:
+def scheduler_state(schedule_path: Path) -> str:
     try:
-        enabled = json.loads(SCHEDULER_PATH.read_text(encoding="utf-8")).get("enabled")
+        enabled = json.loads(schedule_path.read_text(encoding="utf-8")).get("enabled")
         return "Installed" if enabled else "Not installed"
     except (OSError, json.JSONDecodeError):
         return "Not installed"
 
 
-def install_schedule() -> tuple[bool, str]:
+def install_schedule(schedule_path: Path) -> tuple[bool, str]:
     try:
-        temporary = SCHEDULER_PATH.with_suffix(".tmp")
+        temporary = schedule_path.with_suffix(".tmp")
         temporary.write_text(json.dumps({"enabled": True}), encoding="utf-8")
-        temporary.replace(SCHEDULER_PATH)
+        temporary.replace(schedule_path)
     except OSError as error:
         return False, f"Could not enable automatic sending: {error}"
     mode = "cloud service" if CLOUD_MODE else "dashboard server"
@@ -337,8 +348,8 @@ def extract_upload(file_name: str, file_bytes: bytes) -> tuple[list[dict], dict]
     }
 
 
-def replace_reminders(records: list[dict], source_name: str) -> None:
-    workbook = load_workbook(automation.WORKBOOK_PATH)
+def replace_reminders(records: list[dict], source_name: str, workbook_path: Path) -> None:
+    workbook = load_workbook(workbook_path)
     sheet = workbook.active
     header_row, headers = automation.find_header_row(sheet)
     bind_source_headers(sheet, header_row, headers, create_missing=True)
@@ -365,7 +376,7 @@ def replace_reminders(records: list[dict], source_name: str) -> None:
         sheet.cell(row_number, headers["reminder date"]).number_format = "dd-mmm-yyyy"
         sheet.cell(row_number, headers["reminder time"]).number_format = "hh:mm"
         sheet.cell(row_number, headers["actual training date"]).number_format = "dd-mmm-yyyy"
-    workbook.save(automation.WORKBOOK_PATH)
+    workbook.save(workbook_path)
     workbook.close()
 
 
@@ -388,10 +399,10 @@ def read_multipart_upload(handler) -> tuple[str, bytes]:
     raise ValueError("Choose an Excel file to upload.")
 
 
-def update_status(row_number: int, new_status: str) -> None:
+def update_status(row_number: int, new_status: str, workbook_path: Path) -> None:
     if new_status not in {"Ready", "Paused"}:
         raise ValueError("Status must be Ready or Paused.")
-    workbook = load_workbook(automation.WORKBOOK_PATH)
+    workbook = load_workbook(workbook_path)
     sheet = workbook.active
     header_row, headers = automation.find_header_row(sheet)
     bind_source_headers(sheet, header_row, headers)
@@ -408,19 +419,19 @@ def update_status(row_number: int, new_status: str) -> None:
     sheet.cell(row_number, headers["status"]).value = new_status
     if new_status == "Ready":
         sheet.cell(row_number, headers["notes"]).value = ""
-    workbook.save(automation.WORKBOOK_PATH)
+    workbook.save(workbook_path)
     workbook.close()
 
 
-def add_reminder(payload: dict) -> None:
-    _write_reminder(payload, None)
+def add_reminder(payload: dict, workbook_path: Path) -> None:
+    _write_reminder(payload, None, workbook_path)
 
 
-def update_reminder(row_number: int, payload: dict) -> None:
-    _write_reminder(payload, row_number)
+def update_reminder(row_number: int, payload: dict, workbook_path: Path) -> None:
+    _write_reminder(payload, row_number, workbook_path)
 
 
-def _write_reminder(payload: dict, row_number: int | None) -> None:
+def _write_reminder(payload: dict, row_number: int | None, workbook_path: Path) -> None:
     recipient = str(payload.get("recipient", "")).strip()
     participant = str(payload.get("participant", "")).strip()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", recipient):
@@ -432,7 +443,7 @@ def _write_reminder(payload: dict, row_number: int | None) -> None:
     except ValueError as error:
         raise ValueError("Enter valid reminder date, time, and training date values.") from error
 
-    workbook = load_workbook(automation.WORKBOOK_PATH)
+    workbook = load_workbook(workbook_path)
     sheet = workbook.active
     header_row, headers = automation.find_header_row(sheet)
     new_row = max(sheet.max_row + 1, header_row + 1) if row_number is None else row_number
@@ -464,19 +475,21 @@ def _write_reminder(payload: dict, row_number: int | None) -> None:
     sheet.cell(new_row, headers["reminder date"]).number_format = "dd-mmm-yyyy"
     sheet.cell(new_row, headers["reminder time"]).number_format = "hh:mm"
     sheet.cell(new_row, headers["actual training date"]).number_format = "dd-mmm-yyyy"
-    workbook.save(automation.WORKBOOK_PATH)
+    workbook.save(workbook_path)
     workbook.close()
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "TrainingReminders/1.0"
 
-    def _send_json(self, status: int, body: dict) -> None:
+    def _send_json(self, status: int, body: dict, headers: dict[str, str] | None = None) -> None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -491,39 +504,55 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return True
         return self.headers.get("Host", "").lower() in {f"{HOST}:{PORT}", f"localhost:{PORT}"}
 
-    def _authorized(self) -> bool:
-        if not CLOUD_MODE:
-            return True
-        expected_user = os.environ.get("DASHBOARD_USERNAME", "")
-        expected_password = os.environ.get("DASHBOARD_PASSWORD", "")
-        supplied = self.headers.get("Authorization", "")
+    def _session_token(self) -> str:
+        cookie = SimpleCookie()
         try:
-            scheme, encoded = supplied.split(" ", 1)
-            username, password = base64.b64decode(encoded, validate=True).decode("utf-8").split(":", 1)
-        except (ValueError, UnicodeDecodeError):
-            username, password, scheme = "", "", ""
-        authorized = (
-            scheme.casefold() == "basic"
-            and hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
-            and hmac.compare_digest(password.encode("utf-8"), expected_password.encode("utf-8"))
-        )
-        if not authorized:
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="Training Reminders", charset="UTF-8"')
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        return authorized
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie.get("training_session").value if cookie.get("training_session") else ""
+        except (CookieError, AttributeError, TypeError):
+            return ""
+
+    def _account_user(self) -> dict | None:
+        return account_store.get_session(self._session_token())
+
+    def _require_user(self) -> dict | None:
+        user = self._account_user()
+        if not user:
+            self._send_json(401, {"error": "Sign in to use your training dashboard."})
+        return user
+
+    def _cookie_headers(self, token: str, clear: bool = False) -> dict[str, str]:
+        parts = [f"training_session={token}", "Path=/", "HttpOnly", "SameSite=Lax"]
+        if CLOUD_MODE:
+            parts.append("Secure")
+        parts.append("Max-Age=0" if clear else f"Max-Age={account_store.SESSION_DAYS * 24 * 60 * 60}")
+        return {"Set-Cookie": "; ".join(parts)}
+
+    def _valid_origin(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        host = self.headers.get("Host", "").lower()
+        if parsed.netloc.lower() != host:
+            return False
+        return not CLOUD_MODE or parsed.scheme.casefold() == "https"
+
+    def _user_paths(self, user: dict) -> tuple[Path, Path, Path]:
+        paths = account_paths(user["id"])
+        _ensure_account_workbook(paths[0], paths[1], paths[2])
+        return paths
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/healthz":
             self._send_json(200, {"status": "ok"})
             return
-        if not self._authorized():
-            return
         if path == "/":
+            user = self._account_user()
+            page_path = PAGE_PATH if user else LOGIN_PAGE_PATH
             try:
-                page = PAGE_PATH.read_bytes()
+                page = page_path.read_bytes()
             except OSError as error:
                 self._send_json(500, {"error": str(error)})
                 return
@@ -537,8 +566,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(page)
             return
         if path == "/api/dashboard":
+            user = self._require_user()
+            if not user:
+                return
             try:
-                rows, summary = workbook_rows()
+                workbook_path, settings_path, schedule_path = self._user_paths(user)
+                with AUTOMATION_LOCK:
+                    rows, summary = workbook_rows(workbook_path, settings_path, schedule_path)
+                summary["username"] = user["username"]
                 self._send_json(200, {"rows": rows, "summary": summary})
             except Exception as error:
                 self._send_json(500, {"error": str(error)})
@@ -549,24 +584,53 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not self._valid_host():
             self._send_json(403, {"error": "This local dashboard only accepts requests from this computer."})
             return
-        if not self._authorized():
+        if not self._valid_origin():
+            self._send_json(403, {"error": "Request origin is not allowed."})
             return
         path = unquote(urlparse(self.path).path)
         try:
+            payload = {} if path == "/api/upload" else self._read_json()
+            if path == "/api/auth/register":
+                user = account_store.create_user(str(payload.get("username", "")), str(payload.get("password", "")))
+                workbook_path, settings_path, schedule_path = account_paths(user["id"])
+                _ensure_account_workbook(workbook_path, settings_path, schedule_path)
+                token = account_store.create_session(user["id"])
+                self._send_json(201, {"username": user["username"]}, self._cookie_headers(token))
+                return
+            if path == "/api/auth/login":
+                user = account_store.authenticate(str(payload.get("username", "")), str(payload.get("password", "")))
+                if not user:
+                    self._send_json(401, {"error": "Username or password is incorrect."})
+                    return
+                workbook_path, settings_path, schedule_path = account_paths(user["id"])
+                _ensure_account_workbook(workbook_path, settings_path, schedule_path)
+                token = account_store.create_session(user["id"])
+                self._send_json(200, {"username": user["username"]}, self._cookie_headers(token))
+                return
+            if path == "/api/auth/logout":
+                account_store.delete_session(self._session_token())
+                self._send_json(200, {"message": "Signed out."}, self._cookie_headers("", clear=True))
+                return
+            user = self._require_user()
+            if not user:
+                return
+            workbook_path, settings_path, schedule_path = self._user_paths(user)
             if path == "/api/upload":
                 file_name, file_bytes = read_multipart_upload(self)
                 records, details = extract_upload(file_name, file_bytes)
-                replace_reminders(records, file_name)
+                with AUTOMATION_LOCK:
+                    replace_reminders(records, file_name, workbook_path)
                 self._send_json(200, {"message": f"Imported {details['count']} training rows from {file_name}; all are paused for review, and {details['missingEmail']} need an email address.", "count": details["count"], "worksheet": details["worksheet"]})
                 return
-            payload = self._read_json()
             if path == "/api/settings":
-                smtp_settings.save_settings(payload)
-                self._send_json(200, {"message": "SMTP settings saved securely.", "smtp": smtp_settings.public_settings()})
+                with AUTOMATION_LOCK:
+                    smtp_settings.save_settings(payload, settings_path)
+                self._send_json(200, {"message": "SMTP settings saved securely.", "smtp": smtp_settings.public_settings(settings_path)})
                 return
             if path == "/api/test-smtp":
                 try:
-                    result = smtp_settings.check_connection()
+                    with AUTOMATION_LOCK:
+                        result = smtp_settings.check_connection(settings_path)
                 except PermissionError as error:
                     if getattr(error, "winerror", None) == 10013:
                         self._send_json(
@@ -578,29 +642,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"message": result})
                 return
             if path == "/api/enable-schedule":
-                success, output = install_schedule()
+                success, output = install_schedule(schedule_path)
                 self._send_json(200 if success else 400, {"message": output, "success": success})
                 return
             if path == "/api/reminders":
-                add_reminder(payload)
+                with AUTOMATION_LOCK:
+                    add_reminder(payload, workbook_path)
                 self._send_json(201, {"message": "Reminder added to the workbook."})
                 return
             match = re.fullmatch(r"/api/reminders/(\d+)/status", path)
             if match:
-                update_status(int(match.group(1)), str(payload.get("status", "")))
+                with AUTOMATION_LOCK:
+                    update_status(int(match.group(1)), str(payload.get("status", "")), workbook_path)
                 self._send_json(200, {"message": "Reminder status updated."})
                 return
             match = re.fullmatch(r"/api/reminders/(\d+)/update", path)
             if match:
-                update_reminder(int(match.group(1)), payload)
+                with AUTOMATION_LOCK:
+                    update_reminder(int(match.group(1)), payload, workbook_path)
                 self._send_json(200, {"message": "Reminder updated and set to Ready."})
                 return
             if path in {"/api/preview", "/api/send-due"}:
                 output = io.StringIO()
-                with AUTOMATION_LOCK, redirect_stdout(output), redirect_stderr(output):
+                with AUTOMATION_LOCK:
                     return_code = automation.process(
                         send=path == "/api/send-due",
-                        workbook_path=automation.WORKBOOK_PATH,
+                        workbook_path=workbook_path,
+                        settings_path=settings_path,
+                        output_stream=output,
                     )
                 self._send_json(
                     200 if return_code == 0 else 400,
@@ -619,11 +688,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         print(f"[dashboard] {self.address_string()} - {format % args}")
 
 
-def _create_empty_workbook() -> None:
-    if automation.WORKBOOK_PATH.exists():
+def _create_empty_workbook(workbook_path: Path) -> None:
+    if workbook_path.exists():
         return
     from openpyxl import Workbook
 
+    workbook_path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Training Reminders"
@@ -632,40 +702,64 @@ def _create_empty_workbook() -> None:
         "Actual Training Date", "Status", "Sent At", "Gmail Message ID", "Notes",
         *SOURCE_HEADERS.values(),
     ])
-    workbook.save(automation.WORKBOOK_PATH)
+    workbook.save(workbook_path)
     workbook.close()
+
+
+def _ensure_account_workbook(workbook_path: Path, settings_path: Path, schedule_path: Path) -> None:
+    if workbook_path.exists():
+        return
+    # Keep the existing local owner's files on the first local account only.
+    if not CLOUD_MODE and account_store.user_count() == 1:
+        if automation.WORKBOOK_PATH.exists():
+            shutil.copy2(automation.WORKBOOK_PATH, workbook_path)
+        if smtp_settings.SETTINGS_PATH.exists() and not settings_path.exists():
+            shutil.copy2(smtp_settings.SETTINGS_PATH, settings_path)
+        if SCHEDULER_PATH.exists() and not schedule_path.exists():
+            shutil.copy2(SCHEDULER_PATH, schedule_path)
+    _create_empty_workbook(workbook_path)
 
 
 def _scheduler_worker() -> None:
     while True:
-        if scheduler_state() == "Installed":
+        for user_id in account_store.all_user_ids():
             try:
+                workbook_path, settings_path, schedule_path = account_paths(user_id)
+                if scheduler_state(schedule_path) != "Installed" or not workbook_path.exists():
+                    continue
+                output = io.StringIO()
                 with AUTOMATION_LOCK:
-                    return_code = automation.process(send=True, workbook_path=automation.WORKBOOK_PATH)
+                    return_code = automation.process(
+                        send=True,
+                        workbook_path=workbook_path,
+                        settings_path=settings_path,
+                        output_stream=output,
+                    )
+                if output.getvalue():
+                    with (workbook_path.parent / "reminder_automation.log").open("a", encoding="utf-8") as log:
+                        log.write(output.getvalue())
                 if return_code:
-                    print("[scheduler] An automatic reminder check failed; see reminder_automation.log.")
+                    print(f"[scheduler] A reminder check failed for an account; see its account log.")
             except Exception as error:
-                print(f"[scheduler] Automatic check failed: {error}")
+                print(f"[scheduler] Automatic check failed for account {user_id}: {error}")
         time.sleep(60)
 
 
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if CLOUD_MODE:
-        missing = [name for name in ("DASHBOARD_USERNAME", "DASHBOARD_PASSWORD", "SMTP_ENCRYPTION_KEY") if not os.environ.get(name)]
+        missing = [name for name in ("SMTP_ENCRYPTION_KEY",) if not os.environ.get(name)]
         if missing:
             raise SystemExit("Missing required cloud environment variables: " + ", ".join(missing))
-    _create_empty_workbook()
-    automation.log_setup()
+    account_store.initialize()
     if not CLOUD_MODE:
         remove_legacy_scheduled_task()
         try:
-            with urlopen(f"http://{HOST}:{PORT}/api/dashboard", timeout=2) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            if response.status == 200 and isinstance(payload.get("rows"), list):
-                print(f"Training Reminders dashboard is already running: http://{HOST}:{PORT}")
-                webbrowser.open(f"http://{HOST}:{PORT}")
-                return
+            with urlopen(f"http://{HOST}:{PORT}/healthz", timeout=2) as response:
+                if response.status == 200:
+                    print(f"Training Reminders dashboard is already running: http://{HOST}:{PORT}")
+                    webbrowser.open(f"http://{HOST}:{PORT}")
+                    return
         except Exception:
             pass
     threading.Thread(target=_scheduler_worker, name="reminder-scheduler", daemon=True).start()
@@ -674,12 +768,11 @@ def main() -> None:
     except OSError as error:
         try:
             if not CLOUD_MODE:
-                with urlopen(f"http://{HOST}:{PORT}/api/dashboard", timeout=2) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-                if response.status == 200 and isinstance(payload.get("rows"), list):
-                    print(f"Training Reminders dashboard is already running: http://{HOST}:{PORT}")
-                    webbrowser.open(f"http://{HOST}:{PORT}")
-                    return
+                with urlopen(f"http://{HOST}:{PORT}/healthz", timeout=2) as response:
+                    if response.status == 200:
+                        print(f"Training Reminders dashboard is already running: http://{HOST}:{PORT}")
+                        webbrowser.open(f"http://{HOST}:{PORT}")
+                        return
             if CLOUD_MODE:
                 raise error
         except Exception:

@@ -91,18 +91,20 @@ def _unprotect(value: str) -> str:
         kernel32.LocalFree(destination.pbData)
 
 
-def load_settings() -> dict:
-    if not SETTINGS_PATH.exists():
+def load_settings(settings_path: Path | None = None) -> dict:
+    path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
+    if not path.exists():
         return {}
-    data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     password = _unprotect(data["password_protected"]) if data.get("password_protected") else ""
     return {**data, "password": password}
 
 
-def public_settings() -> dict:
-    if not SETTINGS_PATH.exists():
+def public_settings(settings_path: Path | None = None) -> dict:
+    path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
+    if not path.exists():
         return {"configured": False, "passwordSet": False}
-    data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     return {
         "configured": bool(data.get("host") and data.get("from_email")),
         "host": data.get("host", ""),
@@ -114,7 +116,9 @@ def public_settings() -> dict:
     }
 
 
-def save_settings(payload: dict) -> None:
+def save_settings(payload: dict, settings_path: Path | None = None) -> None:
+    path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
     host = str(payload.get("host", "")).strip()
     from_email = str(payload.get("fromEmail", "")).strip()
     username = str(payload.get("username", "")).strip()
@@ -132,7 +136,7 @@ def save_settings(payload: dict) -> None:
     if "@" not in from_email or any(char.isspace() for char in from_email):
         raise ValueError("Enter the sender email address.")
 
-    current = json.loads(SETTINGS_PATH.read_text(encoding="utf-8")) if SETTINGS_PATH.exists() else {}
+    current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     password = str(payload.get("password", ""))
     protected_password = _protect(password) if password else current.get("password_protected", "")
     if username and not protected_password:
@@ -145,14 +149,14 @@ def save_settings(payload: dict) -> None:
         "from_email": from_email,
         "password_protected": protected_password,
     }
-    temporary = SETTINGS_PATH.with_suffix(".tmp")
+    temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
     temporary.replace(SETTINGS_PATH)
 
 
 @contextmanager
-def smtp_client(settings: dict | None = None):
-    settings = settings or load_settings()
+def smtp_client(settings: dict | None = None, settings_path: Path | None = None):
+    settings = settings or load_settings(settings_path)
     host = str(settings.get("host", "")).strip()
     if not host:
         raise ValueError("Set up SMTP in the dashboard before sending reminders.")
@@ -183,18 +187,18 @@ def smtp_client(settings: dict | None = None):
             server.close()
 
 
-def send_message(message: EmailMessage, settings: dict | None = None) -> None:
-    settings = settings or load_settings()
+def send_message(message: EmailMessage, settings: dict | None = None, settings_path: Path | None = None) -> None:
+    settings = settings or load_settings(settings_path)
     from_email = str(settings.get("from_email", "")).strip()
     if not from_email:
         raise ValueError("Set the sender email address in SMTP settings.")
     if "From" not in message:
         message["From"] = from_email
-    with smtp_client(settings) as server:
+    with smtp_client(settings, settings_path) as server:
         server.send_message(message, from_addr=from_email, to_addrs=[message["To"]])
 
 
-def check_connection() -> str:
-    settings = load_settings()
-    with smtp_client(settings):
+def check_connection(settings_path: Path | None = None) -> str:
+    settings = load_settings(settings_path)
+    with smtp_client(settings, settings_path):
         return f"Connected to {settings['host']}:{settings['port']} using {settings['security']}. No email was sent."

@@ -1,25 +1,32 @@
-# Training reminder dashboard
+# Training Desk
 
-Upload an Excel training plan, review imported rows, configure SMTP, and enable automatic email reminders. Reminder times use India time (`Asia/Kolkata`). Uploaded rows start paused so you can review them before sending.
+Training Desk is a public training-reminder website. Visitors can create an account, upload and manage their own training schedule, configure their own SMTP account, and enable automatic reminders. Each account has a separate workbook, SMTP settings file, and scheduler state.
 
 ## Deploy to Render
 
-The repository includes `render.yaml` for Render's Blueprint flow. The cloud version stores the workbook and SMTP settings on a persistent disk, protects the dashboard with a username and password, and runs its minute-by-minute reminder scheduler inside the web service.
+The repository includes `render.yaml` for Render's Blueprint flow.
 
-1. Put this project in a private GitHub repository. Do not commit your local workbook, SMTP settings, passwords, or `.env` file; they are excluded by `.gitignore`.
-2. In Render, choose **New + → Blueprint**, connect the repository, and deploy the `render.yaml` Blueprint. The Blueprint creates a Starter web service and a 1 GB disk mounted at `/var/data`.
-3. When prompted for environment values, set a unique `DASHBOARD_USERNAME` and strong `DASHBOARD_PASSWORD`.
-4. Generate an encryption key on your computer and set it as `SMTP_ENCRYPTION_KEY` in Render:
+1. In Render, choose **New + → Blueprint**, connect this GitHub repository, select the `main` branch, and deploy the Blueprint.
+2. When prompted for `SMTP_ENCRYPTION_KEY`, generate a Fernet key on your computer:
 
    ```powershell
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
    ```
 
-   Keep this key private and unchanged. The app uses it to encrypt the SMTP password saved from the dashboard. If the key changes, the saved password must be entered again.
+   Keep the key secret and unchanged. The app uses it to encrypt each user's saved SMTP password. If it is changed or lost, users must save their SMTP settings again.
 
-5. Open the Render URL and sign in at the browser prompt. Upload your training workbook, review and activate the rows, enter SMTP credentials, check the connection, and enable automatic sending.
+3. Open the Render URL. Anyone can create an account from the sign-in page. Each user must upload their own training workbook and configure their own SMTP account before sending reminders.
 
-Render provides HTTPS for the public service URL. The service's persistent disk keeps app data across restarts and deployments. Keep the service at one instance: the workbook and scheduler are designed for one active app process.
+The Blueprint creates a Starter web service with a 1 GB persistent disk mounted at `/var/data`. That disk stores account records and each user's app data across deployments. Keep the service at one instance because the SQLite account store and reminder scheduler are designed for a single active app process. Render provides HTTPS for the public URL.
+
+## What each account can do
+
+- Register with a unique username and a password of at least 12 characters.
+- Upload a training plan. Imported rows start paused for review.
+- Enter SMTP credentials for their own email account. Passwords are encrypted at rest; the dashboard never displays a saved password.
+- Send due reminders manually or enable the minute-by-minute scheduler.
+
+Each person's workbook and SMTP settings are isolated in their account folder. No central SMTP account is shared among visitors. Users need an SMTP provider that permits their account to send mail; Gmail may require an app password. See Google's [SMTP settings](https://support.google.com/mail/answer/7104828) and [app password help](https://support.google.com/accounts/answer/185833).
 
 ## Run locally on Windows
 
@@ -30,18 +37,8 @@ python -m pip install -r requirements.txt
 python web_app.py
 ```
 
-The dashboard opens at `http://127.0.0.1:8765`. Keep the process running while using the dashboard. **Enable automatic sending** checks reminders inside that server process once per minute; it does not open another Python window or install a Windows scheduled task.
+Open `http://127.0.0.1:8765`, create an account, then upload your workbook and configure SMTP. Keep the dashboard process running for automatic reminders.
 
-## Import your Excel schedule
+## Public service notes
 
-Click **Upload Excel** and choose an `.xlsx` workbook. The importer recognizes training plan columns for serial number, department, training topic, plan status, actual status, reminder date, actual training date, replan status, reminder time, training time, trainer name, trainee employee, and email. It accepts common header variations, including source workbook misspellings such as `Remainder Date`, `Remainder Time`, `Actual Tranining Date`, and `Trainner Name`.
-
-Rows need a reminder date and time and an actual training date. The import replaces the current reminder list in `training_reminders.xlsx` and sets each imported row to Paused. Review the dates and email addresses, then set rows to Ready when approved. Rows without a valid email cannot be activated. The page reports row errors without partially importing the workbook.
-
-## SMTP setup
-
-Open **Configure SMTP** and enter your provider's server host, port, connection security, sender address, username, and password or app password. Click **Save settings**, then **Check connection**. On Render, the password is encrypted with `SMTP_ENCRYPTION_KEY`; locally, Windows Data Protection secures it for your signed-in account.
-
-For Gmail, use `smtp.gmail.com`, port `587` with STARTTLS or port `465` with SSL, and an app password if Google requires one. See Google's [SMTP settings](https://support.google.com/mail/answer/7104828) and [app password help](https://support.google.com/accounts/answer/185833).
-
-**Send due now** sends eligible reminders immediately. **Enable automatic sending** checks every minute. Sent rows are marked `Sent`; failures show `Error` and an explanation. A row left at `Sending` after an interruption may have been delivered, so check the Sent folder before setting it to Ready again.
+The sign-up page is open to the public. Do not use your personal SMTP password as a shared account credential; visitors configure their own SMTP settings. The GitHub repository contains source code only. `.gitignore` excludes local workbooks, SMTP settings, logs, environment files, and app databases.

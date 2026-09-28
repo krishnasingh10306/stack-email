@@ -10,7 +10,7 @@ import sys
 from datetime import date, datetime, time
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 from zoneinfo import ZoneInfo
 
 from openpyxl import load_workbook
@@ -37,11 +37,12 @@ REQUIRED_HEADERS = {
 SAMPLE_EMAILS = {"replace-me@example.com", "example@example.com"}
 
 
-def log_setup() -> None:
+def log_setup(log_path: Path | None = None) -> None:
     logging.basicConfig(
-        filename=LOG_PATH,
+        filename=log_path or LOG_PATH,
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
+        force=True,
     )
 
 
@@ -140,7 +141,19 @@ def save_workbook(workbook, workbook_path: Path) -> None:
     workbook.save(workbook_path)
 
 
-def process(send: bool, workbook_path: Path) -> int:
+def process(
+    send: bool,
+    workbook_path: Path,
+    settings_path: Path | None = None,
+    output_stream: TextIO | None = None,
+) -> int:
+    log_setup(workbook_path.parent / "reminder_automation.log")
+
+    def notify(message: str, error: bool = False) -> None:
+        if output_stream is None:
+            report(message, error=error)
+        else:
+            print(message, file=output_stream)
     if not workbook_path.exists():
         raise FileNotFoundError(f"Workbook not found: {workbook_path}")
     workbook = load_workbook(workbook_path)
@@ -157,7 +170,7 @@ def process(send: bool, workbook_path: Path) -> int:
 
         recipient = str(row_value(row, headers, "recipient email") or "").strip()
         if send and (recipient.lower() in SAMPLE_EMAILS or not recipient):
-            report(f"Row {row_number}: skipped; add a real recipient email before setting Status to Ready.")
+            notify(f"Row {row_number}: skipped; add a real recipient email before setting Status to Ready.")
             continue
         if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", recipient):
             sheet.cell(row_number, headers["status"]).value = "Error"
@@ -186,7 +199,7 @@ def process(send: bool, workbook_path: Path) -> int:
 
         due_count += 1
         if not send:
-            report(
+            notify(
                 f"DUE row {row_number}: {recipient} | training {training_date:%Y-%m-%d} "
                 f"| reminder was {scheduled:%Y-%m-%d %H:%M %Z}"
             )
@@ -198,29 +211,29 @@ def process(send: bool, workbook_path: Path) -> int:
         save_workbook(workbook, workbook_path)
         try:
             message = build_message(recipient, participant, training_date, topic, department, training_time, trainer)
-            smtp_settings.send_message(message)
+            smtp_settings.send_message(message, settings_path=settings_path)
             sheet.cell(row_number, headers["status"]).value = "Sent"
             sheet.cell(row_number, headers["sent at"]).value = datetime.now(TIME_ZONE).replace(tzinfo=None)
             sheet.cell(row_number, headers["gmail message id"]).value = ""
             sheet.cell(row_number, headers["notes"]).value = ""
             save_workbook(workbook, workbook_path)
             logging.info("Sent reminder for row %s to %s", row_number, recipient)
-            report(f"SENT row {row_number}: {recipient}")
+            notify(f"SENT row {row_number}: {recipient}")
         except Exception as error:  # SMTP errors must be recorded for the user.
             sheet.cell(row_number, headers["status"]).value = "Error"
             sheet.cell(row_number, headers["notes"]).value = str(error)[:300]
             save_workbook(workbook, workbook_path)
             logging.exception("Failed to send row %s", row_number)
-            report(f"ERROR row {row_number}: {error}", error=True)
+            notify(f"ERROR row {row_number}: {error}", error=True)
 
     if send:
         # Also persist validation errors when no sendable row made it to the send path.
         save_workbook(workbook, workbook_path)
     if not send:
         if due_count:
-            report(f"Dry run only: {due_count} due reminder(s); no email was sent.")
+            notify(f"Dry run only: {due_count} due reminder(s); no email was sent.")
         else:
-            report("Dry run complete: no Ready reminders are due. No email was sent.")
+            notify("Dry run complete: no Ready reminders are due. No email was sent.")
     workbook.close()
     return 0
 

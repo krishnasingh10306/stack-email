@@ -150,7 +150,7 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><div class="brand-mark">↗</div><span>TRAINING DESK</span></div>
-      <div class="top-actions"><div class="live-pill"><span class="dot"></span><span id="topState">Workbook connected</span></div><div class="avatar">TD</div></div>
+      <div class="top-actions"><div class="live-pill"><span class="dot"></span><span id="topState">Workbook connected</span></div><span id="accountName" class="account-name"></span><button class="button ghost small" id="logoutButton" type="button">Sign out</button></div>
     </header>
 
     <section class="heading">
@@ -274,6 +274,7 @@
     async function request(path, options = {}) {
       const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
       const result = await response.json();
+      if (response.status === 401) { window.location.replace('/'); throw new Error('Please sign in again.'); }
       if (!response.ok) throw new Error(result.error || result.output || 'Something went wrong.');
       return result;
     }
@@ -327,6 +328,7 @@
     }
     function updateSidebar() {
       const s = dashboard.summary;
+      $('#accountName').textContent = s.username ? `@${s.username}` : '';
       $('#metricDue').textContent = s.due ?? 0; $('#metricUpcoming').textContent = s.upcoming ?? 0;
       $('#metricSent').textContent = s.sent ?? 0; $('#metricAttention').textContent = s.needsAttention ?? 0;
       const smtpReady = Boolean(s.smtp && s.smtp.configured);
@@ -395,6 +397,10 @@
       catch (error) { $('#outputText').textContent = error.message; }
     }
     $('#addOpen').addEventListener('click', () => openEdit());
+    $('#logoutButton').addEventListener('click', async () => {
+      try { await request('/api/auth/logout', { method:'POST', body:JSON.stringify({}) }); window.location.replace('/'); }
+      catch (error) { toast(error.message); }
+    });
     $('#uploadOpen').addEventListener('click', () => $('#uploadFile').click());
     $('#chooseFile').addEventListener('click', () => $('#uploadFile').click());
     $('#uploadFile').addEventListener('change', async (event) => {
