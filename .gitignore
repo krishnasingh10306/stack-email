@@ -1,8 +1,13 @@
 __pycache__/
 data/
 *.py[cod]
-.env
 .env.*
-*.xlsx
 *.xls
 *.csv
+
+smtp_settings.json
+smtp_settings.tmp
+reminder_automation.log
+training_reminders.xlsx
+auto_send_enabled.json
+.env

@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4f0">
+  <title>Training reminders</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f4f0;
+      --surface: #fff;
+      --ink: #1e2527;
+      --muted: #717a7c;
+      --line: #e8e9e5;
+      --green: #b6e2a1;
+      --deep-green: #225c48;
+      --violet: #dcd9ff;
+      --orange: #f3c695;
+      --red: #b8483f;
+      --shadow: 0 12px 32px rgba(27, 37, 33, .055);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink); }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .app { width: min(1480px, 100%); margin: 0 auto; padding: 26px 34px 40px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:20px; padding: 4px 0 28px; }
+    .brand { display:flex; align-items:center; gap:12px; font-size:14px; font-weight:750; letter-spacing:-.02em; }
+    .brand-mark { display:grid; place-items:center; width:38px; height:38px; border-radius:13px; background:var(--deep-green); color:white; font-size:19px; }
+    .top-actions { display:flex; align-items:center; gap:12px; }
+    .live-pill { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:999px; background:#fff; padding:9px 13px; color:#53605b; font-size:12px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#78bb68; box-shadow:0 0 0 3px #eaf5e5; }
+    .avatar { display:grid; place-items:center; width:36px; height:36px; border-radius:50%; background:#e8e5dc; color:#44514c; font-weight:700; font-size:12px; }
+    .heading { display:flex; justify-content:space-between; align-items:flex-end; margin: 0 0 26px; gap:20px; }
+    .eyebrow { color:var(--deep-green); text-transform:uppercase; letter-spacing:.13em; font-size:10px; font-weight:800; margin-bottom:9px; }
+    h1 { margin:0; font-size:clamp(28px,3vw,38px); letter-spacing:-.055em; line-height:1.08; }
+    .subhead { margin:9px 0 0; color:var(--muted); font-size:13px; }
+    .import-banner { display:flex; align-items:center; gap:13px; margin:0 0 16px; padding:14px 16px; border:1px solid #e7eade; border-radius:14px; background:#eef3e9; }
+    .import-icon { display:grid; place-items:center; width:36px; height:36px; flex:0 0 auto; border-radius:11px; background:#dcebd3; color:#37664b; font-size:18px; font-weight:800; }
+    .import-copy { display:grid; gap:4px; flex:1; }
+    .import-copy strong { font-size:12px; }
+    .import-copy span { color:#68736c; font-size:10px; }
+    .settings-button { margin-top:9px; width:100%; }
+    .button { border:0; border-radius:11px; padding:11px 16px; font-size:12px; font-weight:730; transition:transform .16s ease, background .16s ease; }
+    .button:hover:not(:disabled) { transform:translateY(-1px); }
+    .button:disabled { opacity:.48; cursor:not-allowed; }
+    .button.primary { color:#fff; background:var(--deep-green); }
+    .button.primary:hover:not(:disabled) { background:#174633; }
+    .button.secondary { color:#35413c; background:#edf0eb; }
+    .button.ghost { color:#4e5c56; background:transparent; border:1px solid var(--line); }
+    .button.small { padding:8px 11px; font-size:11px; border-radius:9px; }
+    .summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:16px; }
+    .metric { position:relative; min-height:112px; overflow:hidden; background:var(--surface); border:1px solid #eeefeb; border-radius:16px; padding:17px 19px; box-shadow:var(--shadow); }
+    .metric::after { content:""; position:absolute; right:-23px; top:-30px; width:92px; height:92px; border-radius:50%; background:var(--tint,#eef4ed); opacity:.8; }
+    .metric:nth-child(1) { --tint:#d9edcf; }
+    .metric:nth-child(2) { --tint:#dedbff; }
+    .metric:nth-child(3) { --tint:#f7dfc4; }
+    .metric:nth-child(4) { --tint:#e6e9e4; }
+    .metric-label { color:var(--muted); font-size:11px; font-weight:650; }
+    .metric-value { margin-top:11px; font-size:29px; font-weight:750; letter-spacing:-.055em; line-height:1; }
+    .metric-note { margin-top:7px; color:#8b9290; font-size:10px; }
+    .layout { display:grid; grid-template-columns:minmax(0,1fr) 305px; align-items:start; gap:16px; }
+    .panel { background:var(--surface); border:1px solid #eeefeb; border-radius:16px; box-shadow:var(--shadow); }
+    .list-panel { overflow:hidden; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:19px 20px 15px; }
+    .panel-title { margin:0; font-size:15px; letter-spacing:-.02em; }
+    .panel-caption { color:var(--muted); font-size:11px; margin:5px 0 0; }
+    .list-controls { display:flex; gap:8px; align-items:center; }
+    .search { width:190px; border:1px solid var(--line); border-radius:9px; outline:none; padding:9px 11px; font-size:11px; background:#fcfcfb; }
+    .search:focus, input:focus { border-color:#8eae9d; box-shadow:0 0 0 3px rgba(79,137,106,.1); outline:none; }
+    .filter { padding:9px 10px; border:1px solid var(--line); border-radius:9px; color:#50605a; background:#fff; font-size:11px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:1500px; }
+    th { padding:10px 14px; background:#fafbf9; border-top:1px solid #f0f1ed; border-bottom:1px solid #f0f1ed; text-align:left; color:#929a96; text-transform:uppercase; letter-spacing:.09em; font-size:9px; font-weight:750; white-space:nowrap; }
+    td { padding:13px 14px; border-bottom:1px solid #f0f1ed; vertical-align:middle; font-size:11px; }
+    tbody tr:last-child td { border-bottom:0; }
+    tbody tr:hover { background:#fcfcfa; }
+    .person { display:flex; gap:10px; align-items:center; min-width:160px; }
+    .person-badge { display:grid; place-items:center; width:30px; height:30px; flex:0 0 auto; border-radius:10px; background:#e8f0e4; color:#38664e; font-weight:750; font-size:10px; }
+    .person-name { font-weight:720; color:#26312d; font-size:11px; }
+    .person-email { color:#929996; margin-top:4px; font-size:10px; }
+    .date-main { color:#303b36; font-weight:660; white-space:nowrap; }
+    .date-sub { color:#9aa09d; font-size:10px; margin-top:4px; white-space:nowrap; }
+    .status { display:inline-flex; gap:6px; align-items:center; border-radius:99px; padding:6px 9px; font-size:9px; font-weight:760; white-space:nowrap; }
+    .status::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+    .status.ready { color:#3a7752; background:#e9f5e7; }
+    .status.sample { color:#727a74; background:#f0f1ed; }
+    .status.sent { color:#4a61a4; background:#eef0ff; }
+    .status.paused { color:#89714c; background:#faf1dc; }
+    .status.error, .status.sending { color:#a2423a; background:#fae9e5; }
+    .row-actions { display:flex; justify-content:flex-end; gap:5px; }
+    .icon-button { border:1px solid transparent; border-radius:8px; background:transparent; color:#7a8580; padding:7px 8px; font-size:10px; }
+    .icon-button:hover { border-color:#e7e9e4; background:#f7f8f5; color:#26312d; }
+    .empty { padding:35px 18px; text-align:center; color:#929996; font-size:12px; }
+    .side { display:grid; gap:14px; }
+    .next-card { padding:18px; background:#203c32; color:#fff; border:0; overflow:hidden; position:relative; }
+    .next-card::after { content:""; position:absolute; width:155px; height:155px; border-radius:50%; background:rgba(182,226,161,.09); right:-65px; top:76px; }
+    .next-top { display:flex; justify-content:space-between; align-items:center; color:#c2d6ca; font-size:10px; }
+    .calendar-icon { display:grid; place-items:center; width:29px; height:29px; border-radius:9px; color:#263f34; background:#c9e8b6; font-weight:800; }
+    .next-person { position:relative; z-index:1; margin-top:24px; font-size:21px; letter-spacing:-.04em; font-weight:740; }
+    .next-email { position:relative; z-index:1; margin-top:5px; color:#c3d4cb; font-size:10px; }
+    .next-date { position:relative; z-index:1; display:flex; align-items:center; gap:9px; margin-top:20px; padding-top:14px; border-top:1px solid rgba(255,255,255,.15); }
+    .next-date strong { font-size:13px; }
+    .next-date span { color:#c3d4cb; font-size:10px; }
+    .actions-card { padding:17px; }
+    .side-heading { font-size:12px; font-weight:760; margin:0; }
+    .side-copy { color:var(--muted); font-size:10px; line-height:1.55; margin:6px 0 14px; }
+    .action-stack { display:grid; gap:8px; }
+    .action-stack .button { width:100%; text-align:center; }
+    .connection { padding:16px 17px; }
+    .connection-line { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid #f0f1ed; font-size:10px; }
+    .connection-line:last-child { border:0; padding-bottom:0; }
+    .connection-label { color:var(--muted); }
+    .connection-value { display:flex; gap:6px; align-items:center; color:#4d6257; font-weight:680; }
+    .connection-value.pending { color:#8b7150; }
+    .connection-value::before { content:""; width:6px; height:6px; border-radius:50%; background:#87bb70; }
+    .connection-value.pending::before { background:#dfa45a; }
+    .activity { padding:16px 17px; }
+    .activity-item { display:flex; gap:9px; align-items:flex-start; padding-top:13px; color:#69736e; font-size:10px; line-height:1.5; }
+    .activity-mark { width:7px; height:7px; flex:0 0 auto; margin-top:3px; border-radius:50%; background:#aac89b; }
+    .toast { position:fixed; right:24px; bottom:22px; z-index:4; max-width:min(420px,calc(100vw - 36px)); border-radius:12px; padding:13px 16px; background:#203c32; color:#fff; box-shadow:0 12px 38px rgba(20,35,28,.2); font-size:12px; opacity:0; transform:translateY(12px); pointer-events:none; transition:.2s ease; }
+    .toast.show { opacity:1; transform:translateY(0); }
+    dialog { width:min(470px,calc(100vw - 28px)); border:1px solid var(--line); border-radius:17px; padding:0; color:var(--ink); box-shadow:0 24px 80px rgba(22,38,31,.22); }
+    dialog::backdrop { background:rgba(22,35,29,.3); backdrop-filter:blur(3px); }
+    .dialog-head { display:flex; justify-content:space-between; align-items:flex-start; padding:20px 22px 14px; border-bottom:1px solid var(--line); }
+    .dialog-head h2 { margin:0; font-size:18px; letter-spacing:-.035em; }
+    .dialog-head p { margin:5px 0 0; color:var(--muted); font-size:11px; }
+    .close { border:0; background:transparent; color:#6f7975; font-size:20px; line-height:1; }
+    form { padding:17px 22px 21px; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .field { display:grid; gap:6px; }
+    .field.full { grid-column:1/-1; }
+    label { color:#64706a; font-size:10px; font-weight:700; }
+    input { width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; padding:10px; color:var(--ink); background:#fff; font-size:12px; }
+    .form-foot { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+    .disclaimer { margin-top:12px; color:#939b96; font-size:9px; }
+    .modal-output { padding:14px; margin:14px 20px 0; background:#f4f6f2; border-radius:10px; color:#3c4842; white-space:pre-wrap; font:11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; max-height:300px; overflow:auto; }
+    .modal-output:empty { display:none; }
+    .loading { color:#919a95; }
+    .due-row { background:#fbfdf9; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media (max-width:1080px) { .layout { grid-template-columns:1fr; } .side { grid-template-columns:repeat(2,minmax(0,1fr)); } .next-card { grid-row:span 2; } }
+    @media (max-width:720px) { .app { padding:17px 14px 28px; } .topbar { padding-bottom:23px; } .live-pill { display:none; } .heading { align-items:flex-start; flex-direction:column; } .heading .top-actions { width:100%; } .heading .button { flex:1; } .import-banner { align-items:flex-start; flex-wrap:wrap; } .import-copy { min-width:calc(100% - 56px); } .import-banner .button { width:100%; } .summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; } .metric { min-height:102px; padding:15px; } .layout { gap:12px; } .panel-head { align-items:flex-start; flex-direction:column; padding:16px; } .list-controls { width:100%; } .search { flex:1; width:1px; } .side { grid-template-columns:1fr; } .next-card { grid-row:auto; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark">↗</div><span>TRAINING DESK</span></div>
+      <div class="top-actions"><div class="live-pill"><span class="dot"></span><span id="topState">Workbook connected</span></div><div class="avatar">TD</div></div>
+    </header>
+
+    <section class="heading">
+      <div><div class="eyebrow">TRAINING PLAN · REMINDER AUTOMATION</div><h1>Training plan</h1><p class="subhead">Manage the full training schedule and email reminders in one place.</p></div>
+      <div class="top-actions"><button class="button ghost" id="addOpen">Add manually</button><button class="button primary" id="uploadOpen">↑ &nbsp; Upload Excel</button><input id="uploadFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
+    </section>
+
+    <section class="import-banner">
+      <div class="import-icon">↥</div><div class="import-copy"><strong>Upload your training plan</strong><span>Imports department, topic, plan and actual status, reminder and training dates and times, trainer, trainee, and email. Rows start Paused for review before activation.</span></div>
+      <button class="button secondary" id="chooseFile">Choose .xlsx file</button>
+    </section>
+
+    <section class="summary" aria-label="Reminder overview">
+      <article class="metric"><div class="metric-label">Due now</div><div class="metric-value" id="metricDue">—</div><div class="metric-note">Ready to send</div></article>
+      <article class="metric"><div class="metric-label">Scheduled</div><div class="metric-value" id="metricUpcoming">—</div><div class="metric-note">Upcoming reminders</div></article>
+      <article class="metric"><div class="metric-label">Sent</div><div class="metric-value" id="metricSent">—</div><div class="metric-note">Completed reminders</div></article>
+      <article class="metric"><div class="metric-label">Needs attention</div><div class="metric-value" id="metricAttention">—</div><div class="metric-note">Paused rows, errors, or interrupted sends</div></article>
+    </section>
+
+    <main class="layout">
+      <section class="panel list-panel">
+        <div class="panel-head">
+          <div><h2 class="panel-title">Reminder schedule</h2><p class="panel-caption">Updates are saved directly to your Excel workbook.</p></div>
+          <div class="list-controls"><input class="search" id="search" type="search" placeholder="Search name or email" aria-label="Search reminders"><select class="filter" id="filter" aria-label="Filter status"><option value="all">All statuses</option><option value="Ready">Ready</option><option value="Sample">Sample</option><option value="Sent">Sent</option><option value="Paused">Paused</option><option value="Error">Error</option></select></div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Sr. No.</th><th>Department</th><th>Training Topic</th><th>Plan Status</th><th>Actual Status</th><th>Reminder Date</th><th>Actual Training Date</th><th>Replan Status</th><th>Reminder Time</th><th>Training Time</th><th>Trainer Name</th><th>Trainee Employee</th><th>Email</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="15" class="empty loading">Loading workbook…</td></tr></tbody>
+        </table></div>
+      </section>
+
+      <aside class="side">
+        <section class="panel next-card">
+          <div class="next-top"><span>NEXT REMINDER</span><div class="calendar-icon">▦</div></div>
+          <div class="next-person" id="nextName">All caught up</div><div class="next-email" id="nextEmail">No upcoming reminders</div>
+          <div class="next-date"><strong id="nextDate">—</strong><span id="nextTime">Add a reminder to get started</span></div>
+        </section>
+
+        <section class="panel actions-card">
+          <h2 class="side-heading">Automation controls</h2><p class="side-copy">Preview checks what is due. Send now delivers due emails using your saved SMTP settings.</p>
+          <div class="action-stack"><button class="button secondary" id="previewButton">Preview due reminders</button><button class="button primary" id="sendButton">Send due now</button><button class="button ghost" id="scheduleButton">Enable automatic sending</button></div>
+        </section>
+
+        <section class="panel connection">
+          <h2 class="side-heading">Connections</h2>
+          <div class="connection-line"><span class="connection-label">Excel workbook</span><span class="connection-value">Connected</span></div>
+          <div class="connection-line"><span class="connection-label">SMTP email</span><span class="connection-value pending" id="smtpState">Setup needed</span></div>
+          <div class="connection-line"><span class="connection-label">Auto check</span><span class="connection-value pending" id="schedulerState">Not installed</span></div>
+          <button class="button ghost small settings-button" id="smtpOpen">Configure SMTP</button>
+        </section>
+
+        <section class="panel activity">
+          <h2 class="side-heading">Quick setup</h2>
+        <div class="activity-item"><span class="activity-mark"></span><span>Upload the training plan with trainee email, reminder date/time, and actual training date.</span></div>
+          <div class="activity-item"><span class="activity-mark"></span><span>Configure SMTP with your provider's host, port, and app password.</span></div>
+          <div class="activity-item"><span class="activity-mark"></span><span>Enable automatic sending. Keep this computer on and signed in.</span></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="addDialog">
+    <div class="dialog-head"><div><h2 id="formTitle">Add a reminder</h2><p id="formSubtitle">New entries are added to the workbook as Ready.</p></div><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <form id="addForm">
+      <div class="form-grid">
+        <div class="field"><label for="serialNo">Sr. No.</label><input id="serialNo" name="serialNo" inputmode="numeric"></div>
+        <div class="field"><label for="department">Department</label><input id="department" name="department"></div>
+        <div class="field full"><label for="topic">Training Topic</label><input id="topic" name="topic"></div>
+        <div class="field"><label for="planStatus">Plan Status</label><input id="planStatus" name="planStatus" placeholder="P or R"></div>
+        <div class="field"><label for="actualStatus">Actual Status</label><input id="actualStatus" name="actualStatus" placeholder="Completed status"></div>
+        <div class="field"><label for="replanStatus">Replan Status</label><input id="replanStatus" name="replanStatus"></div>
+        <div class="field"><label for="reminderDate">Reminder Date</label><input id="reminderDate" name="reminderDate" type="date" required></div>
+        <div class="field"><label for="reminderTime">Reminder Time (IST)</label><input id="reminderTime" name="reminderTime" type="time" required></div>
+        <div class="field"><label for="trainingDate">Actual Training Date</label><input id="trainingDate" name="trainingDate" type="date" required></div>
+        <div class="field"><label for="trainingTime">Training Time</label><input id="trainingTime" name="trainingTime" placeholder="e.g. 3:00 pm to 3:40 pm"></div>
+        <div class="field"><label for="trainer">Trainer Name</label><input id="trainer" name="trainer"></div>
+        <div class="field"><label for="participant">Trainee Employee</label><input id="participant" name="participant" placeholder="Employee name"></div>
+        <div class="field full"><label for="recipient">Email</label><input id="recipient" name="recipient" type="email" required placeholder="name@example.com"></div>
+      </div>
+      <div class="disclaimer">A Ready reminder is sent only after its scheduled time arrives.</div>
+      <div class="form-foot"><button class="button ghost" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save reminder</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="smtpDialog">
+    <div class="dialog-head"><div><h2>SMTP email settings</h2><p>Credentials are encrypted for your Windows account on this computer.</p></div><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <form id="smtpForm">
+      <div class="form-grid">
+        <div class="field full"><label for="smtpHost">SMTP host</label><input id="smtpHost" name="host" required placeholder="smtp.gmail.com"></div>
+        <div class="field"><label for="smtpPort">Port</label><input id="smtpPort" name="port" type="number" min="1" max="65535" required value="587"></div>
+        <div class="field"><label for="smtpSecurity">Connection security</label><select id="smtpSecurity" name="security" class="filter"><option value="STARTTLS">STARTTLS</option><option value="SSL">SSL/TLS</option></select></div>
+        <div class="field full"><label for="smtpFrom">From email address</label><input id="smtpFrom" name="fromEmail" type="email" required placeholder="you@example.com"></div>
+        <div class="field full"><label for="smtpUsername">SMTP username</label><input id="smtpUsername" name="username" autocomplete="username" placeholder="Often your full email address"></div>
+        <div class="field full"><label for="smtpPassword">SMTP password or app password</label><input id="smtpPassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved password"></div>
+      </div>
+      <div class="disclaimer">For Gmail, use an app password if your account requires one. The dashboard never displays a saved password.</div>
+      <div class="form-foot"><button class="button ghost" type="button" id="smtpTest">Check connection</button><button class="button primary" type="submit">Save settings</button></div>
+    </form>
+    <pre class="modal-output" id="smtpOutput"></pre>
+  </dialog>
+
+  <dialog id="outputDialog">
+    <div class="dialog-head"><div><h2 id="outputTitle">Reminder preview</h2><p id="outputSubtitle">No email will be sent in preview mode.</p></div><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <pre class="modal-output" id="outputText"></pre>
+    <div class="form-foot" style="padding:0 20px 18px"><button class="button secondary" type="button" data-close>Done</button></div>
+  </dialog>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const rowsNode = $('#rows');
+    let dashboard = { rows: [], summary: {} };
+    let toastTimer;
+    let editingRow = null;
+
+    function toast(message) {
+      const node = $('#toast'); node.textContent = message; node.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 3200);
+    }
+    async function request(path, options = {}) {
+      const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || result.output || 'Something went wrong.');
+      return result;
+    }
+    function localDate(iso) {
+      if (!iso) return 'Date missing';
+      const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
+      return new Intl.DateTimeFormat('en-IN', { day:'numeric', month:'short', year:'numeric', timeZone:'UTC' }).format(new Date(Date.UTC(year, month - 1, day)));
+    }
+    function localTime(iso) {
+      if (!iso) return 'Time missing';
+      const date = new Date(iso);
+      return new Intl.DateTimeFormat('en-IN', { hour:'numeric', minute:'2-digit', timeZone:'Asia/Kolkata' }).format(date);
+    }
+    function statusClass(status) { return String(status || '').toLowerCase().replace(/[^a-z]/g, '') || 'sample'; }
+    function el(tag, className, text) {
+      const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
+    }
+    function renderRows() {
+      const query = $('#search').value.trim().toLowerCase();
+      const filter = $('#filter').value;
+      const visible = dashboard.rows.filter((row) => {
+        const matchesQuery = `${row.serialNo} ${row.department} ${row.topic} ${row.participant} ${row.recipient} ${row.trainer}`.toLowerCase().includes(query);
+        return matchesQuery && (filter === 'all' || row.status.toLowerCase() === filter.toLowerCase());
+      });
+      rowsNode.replaceChildren();
+      if (!visible.length) {
+        const tr = el('tr'); const td = el('td', 'empty', 'No reminders match this view.'); td.colSpan = 15;
+        tr.append(td); rowsNode.append(tr);
+        return;
+      }
+      for (const row of visible) {
+        const tr = el('tr', row.isDue ? 'due-row' : '');
+        const values = [row.serialNo, row.department, row.topic, row.planStatus, row.actualStatus,
+          row.reminderAt ? localDate(row.reminderAt) : '', row.trainingDate ? localDate(row.trainingDate) : '',
+          row.replanStatus, row.reminderAt ? `${localTime(row.reminderAt)} IST` : '', row.trainingTime,
+          row.trainer, row.participant, row.recipient];
+        for (const value of values) tr.append(el('td', '', value || '—'));
+        const statusCell = el('td');
+        const status = el('span', `status ${statusClass(row.status)}`, row.status || 'Sample'); statusCell.append(status);
+        if (row.notes) { const note = el('div', 'date-sub', row.notes); note.title = row.notes; statusCell.append(note); }
+        const actionsCell = el('td');
+        const actions = el('div', 'row-actions');
+        if (!['sent','sending'].includes(row.status.toLowerCase())) {
+          const edit = el('button', 'icon-button', 'Edit'); edit.type = 'button'; edit.addEventListener('click', () => openEdit(row)); actions.append(edit);
+          const button = el('button', 'icon-button', row.status.toLowerCase() === 'ready' ? 'Pause' : 'Set ready');
+          button.type = 'button'; button.addEventListener('click', () => setStatus(row, row.status.toLowerCase() === 'ready' ? 'Paused' : 'Ready'));
+          actions.append(button);
+        }
+        actionsCell.append(actions); tr.append(statusCell, actionsCell); rowsNode.append(tr);
+      }
+    }
+    function updateSidebar() {
+      const s = dashboard.summary;
+      $('#metricDue').textContent = s.due ?? 0; $('#metricUpcoming').textContent = s.upcoming ?? 0;
+      $('#metricSent').textContent = s.sent ?? 0; $('#metricAttention').textContent = s.needsAttention ?? 0;
+      const smtpReady = Boolean(s.smtp && s.smtp.configured);
+      $('#smtpState').textContent = smtpReady ? (s.smtp.passwordSet ? 'Configured' : 'No password') : 'Setup needed';
+      $('#smtpState').classList.toggle('pending', !smtpReady || (s.smtp.username && !s.smtp.passwordSet));
+      $('#schedulerState').textContent = s.scheduler || 'Unknown';
+      $('#schedulerState').classList.toggle('pending', s.scheduler !== 'Installed');
+      $('#topState').textContent = `Workbook connected · ${s.timeZone || 'IST'}`;
+      const next = dashboard.rows.find((row) => row.status.toLowerCase() === 'ready' && !row.isDue);
+      const due = dashboard.rows.find((row) => row.isDue);
+      const item = due || next;
+      $('#nextName').textContent = item ? (item.participant || 'Participant') : 'All caught up';
+      $('#nextEmail').textContent = item ? item.recipient : 'No upcoming reminders';
+      $('#nextDate').textContent = item ? localDate(item.reminderAt) : '—';
+      $('#nextTime').textContent = item ? `${localTime(item.reminderAt)} IST${due ? ' · due now' : ''}` : 'Add a reminder to get started';
+      $('#sendButton').disabled = !(s.due > 0) || !smtpReady;
+      $('#scheduleButton').disabled = !smtpReady || s.scheduler === 'Installed';
+      $('#scheduleButton').textContent = s.scheduler === 'Installed' ? 'Automatic sending enabled' : 'Enable automatic sending';
+      $('#previewButton').disabled = false;
+    }
+    async function refresh() {
+      try { dashboard = await request('/api/dashboard'); updateSidebar(); renderRows(); }
+      catch (error) { rowsNode.replaceChildren(); const tr = el('tr'); const td = el('td', 'empty', error.message); td.colSpan = 15; tr.append(td); rowsNode.append(tr); toast(error.message); }
+    }
+    async function setStatus(row, status) {
+      try { await request(`/api/reminders/${row.row}/status`, { method:'POST', body:JSON.stringify({ status }) }); toast(`Reminder set to ${status}.`); await refresh(); }
+      catch (error) { toast(error.message); }
+    }
+    function openEdit(row = null) {
+      editingRow = row ? row.row : null;
+      const form = $('#addForm'); form.reset();
+      $('#formTitle').textContent = row ? 'Edit reminder' : 'Add a reminder';
+      $('#formSubtitle').textContent = row ? 'Saving will set this reminder to Ready.' : 'New entries are added to the workbook as Ready.';
+      if (row) {
+        $('#recipient').value = row.recipient;
+        $('#participant').value = row.participant;
+        $('#serialNo').value = row.serialNo;
+        $('#department').value = row.department;
+        $('#topic').value = row.topic;
+        $('#planStatus').value = row.planStatus;
+        $('#actualStatus').value = row.actualStatus;
+        $('#replanStatus').value = row.replanStatus;
+        $('#trainingTime').value = row.trainingTime;
+        $('#trainer').value = row.trainer;
+        $('#reminderDate').value = row.reminderAt ? row.reminderAt.slice(0, 10) : '';
+        $('#reminderTime').value = row.reminderAt ? row.reminderAt.slice(11, 16) : '';
+        $('#trainingDate').value = row.trainingDate;
+      }
+      $('#addDialog').showModal();
+    }
+    function openSmtp() {
+      const smtp = dashboard.summary.smtp || {};
+      $('#smtpHost').value = smtp.host || '';
+      $('#smtpPort').value = smtp.port || 587;
+      $('#smtpSecurity').value = smtp.security || 'STARTTLS';
+      $('#smtpFrom').value = smtp.fromEmail || '';
+      $('#smtpUsername').value = smtp.username || '';
+      $('#smtpPassword').value = '';
+      $('#smtpOutput').textContent = smtp.passwordSet ? 'A password is saved securely. Leave the password field blank to keep it.' : '';
+      $('#smtpDialog').showModal();
+    }
+    async function runAction(path, title, subtitle) {
+      const dialog = $('#outputDialog'); $('#outputTitle').textContent = title; $('#outputSubtitle').textContent = subtitle;
+      $('#outputText').textContent = 'Working…'; dialog.showModal();
+      try { const result = await request(path, { method:'POST', body:JSON.stringify({}) }); $('#outputText').textContent = result.output || result.message || 'Done.'; await refresh(); }
+      catch (error) { $('#outputText').textContent = error.message; }
+    }
+    $('#addOpen').addEventListener('click', () => openEdit());
+    $('#uploadOpen').addEventListener('click', () => $('#uploadFile').click());
+    $('#chooseFile').addEventListener('click', () => $('#uploadFile').click());
+    $('#uploadFile').addEventListener('change', async (event) => {
+      const file = event.currentTarget.files[0]; if (!file) return;
+      const data = new FormData(); data.append('file', file);
+      try {
+        const response = await fetch('/api/upload', { method:'POST', body:data });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Upload failed.');
+        toast(result.message); await refresh();
+      } catch (error) { toast(error.message); }
+      finally { event.currentTarget.value = ''; }
+    });
+    document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
+    $('#search').addEventListener('input', renderRows); $('#filter').addEventListener('change', renderRows);
+    $('#previewButton').addEventListener('click', () => runAction('/api/preview', 'Reminder preview', 'Safe mode · no email will be sent.'));
+    $('#sendButton').addEventListener('click', () => {
+      if (confirm('Send all reminders that are due now? This sends email through your SMTP account.')) {
+        runAction('/api/send-due', 'Sending due reminders', 'Your SMTP server may take a moment to respond.');
+      }
+    });
+    $('#smtpOpen').addEventListener('click', openSmtp);
+    $('#smtpForm').addEventListener('submit', async (event) => {
+      event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+      try {
+        const result = await request('/api/settings', { method:'POST', body:JSON.stringify(values) });
+        $('#smtpOutput').textContent = result.message; toast(result.message); await refresh();
+      } catch (error) { $('#smtpOutput').textContent = error.message; }
+    });
+    $('#smtpTest').addEventListener('click', async () => {
+      const values = Object.fromEntries(new FormData($('#smtpForm')).entries());
+      try {
+        await request('/api/settings', { method:'POST', body:JSON.stringify(values) });
+        const result = await request('/api/test-smtp', { method:'POST', body:JSON.stringify({}) });
+        $('#smtpOutput').textContent = result.message; toast('SMTP connection is working.'); await refresh();
+      } catch (error) { $('#smtpOutput').textContent = error.message; }
+    });
+    $('#scheduleButton').addEventListener('click', async () => {
+      const cloud = dashboard.summary.schedulerMode === 'cloud';
+      if (!confirm(cloud ? 'Enable automatic checks every minute? Due reminders will be sent by the cloud service.' : 'Enable automatic checks every minute while this dashboard is running?')) return;
+      $('#scheduleButton').disabled = true;
+      try {
+        const result = await request('/api/enable-schedule', { method:'POST', body:JSON.stringify({}) });
+        $('#outputTitle').textContent = result.success ? 'Automatic sending enabled' : 'Could not enable automation';
+        $('#outputSubtitle').textContent = cloud ? 'The cloud service checks reminders every minute.' : 'The dashboard checks reminders every minute while it is running.';
+        $('#outputText').textContent = result.message || 'Done.'; $('#outputDialog').showModal(); await refresh();
+      } catch (error) { toast(error.message); }
+      finally { $('#scheduleButton').disabled = false; }
+    });
+    $('#addForm').addEventListener('submit', async (event) => {
+      event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+      try { const path = editingRow ? `/api/reminders/${editingRow}/update` : '/api/reminders'; const result = await request(path, { method:'POST', body:JSON.stringify(values) }); $('#addDialog').close(); event.currentTarget.reset(); editingRow = null; toast(result.message); await refresh(); }
+      catch (error) { toast(error.message); }
+    });
+    refresh(); setInterval(refresh, 30000);
+  </script>
+</body>
+</html>
